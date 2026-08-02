@@ -1,5 +1,6 @@
 const DashboardView = (() => {
   let chartInstance = null;
+  let selectedMonth = null; // 'YYYY-MM' or null = latest
 
   function render() {
     const nw = Store.netWorth('All');
@@ -35,6 +36,8 @@ const DashboardView = (() => {
         ${typeRows || emptyRow('No accounts yet — add one under Accounts')}
       </div>
 
+      ${renderMonthDrilldown()}
+
       <div class="card">
         <h3>Year-End Savings Estimate</h3>
         <div class="big-number num">${Store.formatMoney(prediction.yearEndEstimate)}</div>
@@ -46,6 +49,66 @@ const DashboardView = (() => {
       <div class="card">
         <h3>Goals</h3>
         ${goalsHtml}
+      </div>
+    `;
+  }
+
+  function renderMonthDrilldown() {
+    const months = Store.snapshotMonthOptions();
+    if (!months.length) return '';
+    const month = selectedMonth && months.includes(selectedMonth) ? selectedMonth : months[0];
+    const { byType, byOwner, total } = Store.monthBreakdown(month);
+    const topExpenses = Store.topExpensesForMonth(month, 5);
+
+    const monthLabel = new Date(Number(month.slice(0,4)), Number(month.slice(5,7))-1, 1)
+      .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const typeRows = Object.entries(byType).sort((a,b) => b[1]-a[1]).map(([t, v]) => `
+      <div class="ledger-row">
+        <div class="ledger-main"><span class="ledger-name">${t}</span></div>
+        <div class="ledger-amount num">${Store.formatMoney(v)}</div>
+      </div>
+    `).join('') || emptyRow('No data for this month');
+
+    const ownerRows = ['Mine','His','Joint'].map(o => `
+      <div class="ledger-row">
+        <div class="ledger-main">
+          <span class="owner-dot ${o==='Mine'?'mine':o==='His'?'his':'joint'}"></span>
+          <span class="ledger-name">${o}</span>
+        </div>
+        <div class="ledger-amount num">${Store.formatMoney(byOwner[o] || 0)}</div>
+      </div>
+    `).join('');
+
+    const expenseRows = topExpenses.map(t => `
+      <div class="ledger-row">
+        <div class="ledger-main">
+          <span class="ledger-name">${t.description}</span>
+          <span class="ledger-sub">${t.category}</span>
+        </div>
+        <div class="ledger-amount num">${Store.formatMoney(Math.abs(t.amount))}</div>
+      </div>
+    `).join('') || emptyRow('No expenses logged this month');
+
+    return `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h3>Month Snapshot</h3>
+          <select id="month-select" style="width:auto; font-size:0.82rem; padding:6px 8px;">
+            ${months.map(m => `<option value="${m}" ${m===month?'selected':''}>${new Date(Number(m.slice(0,4)), Number(m.slice(5,7))-1, 1).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</option>`).join('')}
+          </select>
+        </div>
+        <div class="ledger-sub" style="margin-bottom:2px;">${monthLabel} total</div>
+        <div class="big-number num" style="font-size:1.5rem;">${Store.formatMoney(total)}</div>
+
+        <div class="section-label">By Asset Type</div>
+        ${typeRows}
+
+        <div class="section-label">By Owner</div>
+        ${ownerRows}
+
+        <div class="section-label">Top 5 Expenses</div>
+        ${expenseRows}
       </div>
     `;
   }
@@ -96,30 +159,36 @@ const DashboardView = (() => {
   function afterRender() {
     const trend = Store.netWorthTrend(12, 'All');
     const ctx = document.getElementById('nw-chart');
-    if (!ctx) return;
-    if (chartInstance) chartInstance.destroy();
-    chartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: trend.map(t => t.label),
-        datasets: [{
-          data: trend.map(t => t.value),
-          borderColor: '#1F6E5C',
-          backgroundColor: 'rgba(31,110,92,0.08)',
-          fill: true,
-          tension: 0.35,
-          pointRadius: 0,
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          y: { ticks: { callback: v => Store.formatMoney(v) }, grid: { color: '#E2E0D8' } },
-          x: { grid: { display: false } }
+    if (ctx) {
+      if (chartInstance) chartInstance.destroy();
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: trend.map(t => t.label),
+          datasets: [{
+            data: trend.map(t => t.value),
+            borderColor: '#1F6E5C',
+            backgroundColor: 'rgba(31,110,92,0.08)',
+            fill: true,
+            tension: 0.35,
+            pointRadius: 0,
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { ticks: { callback: v => Store.formatMoney(v) }, grid: { color: '#E2E0D8' } },
+            x: { grid: { display: false } }
+          }
         }
-      }
+      });
+    }
+
+    document.getElementById('month-select')?.addEventListener('change', (e) => {
+      selectedMonth = e.target.value;
+      App.rerender();
     });
 
     document.querySelectorAll('[data-view-link]').forEach(el => {

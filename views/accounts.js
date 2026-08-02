@@ -1,7 +1,59 @@
 const AccountsView = (() => {
   let ownerFilter = 'All';
+  let viewMode = 'owner'; // 'owner' | 'institution'
 
   function render() {
+    const modeToggle = `
+      <div class="filter-row">
+        <button class="pill ${viewMode === 'owner' ? 'active' : ''}" data-view-mode="owner">By Owner</button>
+        <button class="pill ${viewMode === 'institution' ? 'active' : ''}" data-view-mode="institution">By Institution</button>
+      </div>
+    `;
+    return modeToggle + (viewMode === 'institution' ? renderByInstitution() : renderByOwner());
+  }
+
+  function renderByInstitution() {
+    const groups = {};
+    Store.state.accounts.forEach(a => {
+      const key = a.institution || 'Unspecified';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(a);
+    });
+
+    const withTotals = Object.entries(groups).map(([inst, accts]) => {
+      const total = accts.reduce((sum, a) => sum + Store.toHomeCurrency(Store.accountValue(a), a.currency), 0);
+      return { inst, accts, total };
+    }).sort((a, b) => b.total - a.total);
+
+    const cards = withTotals.map(({ inst, accts, total }) => {
+      const rows = accts
+        .slice()
+        .sort((a, b) => Store.toHomeCurrency(Store.accountValue(b), b.currency) - Store.toHomeCurrency(Store.accountValue(a), a.currency))
+        .map(a => `
+          <div class="ledger-row" data-account-id="${a.id}">
+            <div class="ledger-main">
+              <span class="owner-dot ${ownerClass(a.owner)}"></span>
+              <span class="ledger-name">${a.name}</span>
+              <span class="ledger-sub">${a.type}</span>
+            </div>
+            <div class="ledger-amount num">${new Intl.NumberFormat('en-CA', {style:'currency', currency: a.currency}).format(Store.accountValue(a))}</div>
+          </div>
+        `).join('');
+      return `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between;">
+            <h3>${inst}</h3>
+            <span class="ledger-amount num">${Store.formatMoney(total)}</span>
+          </div>
+          ${rows}
+        </div>
+      `;
+    }).join('');
+
+    return cards || `<div class="card"><div class="empty-state">No accounts yet</div></div>`;
+  }
+
+  function renderByOwner() {
     const filtered = ownerFilter === 'All'
       ? Store.state.accounts
       : Store.state.accounts.filter(a => a.owner === ownerFilter);
@@ -81,6 +133,9 @@ const AccountsView = (() => {
   }
 
   function afterRender() {
+    document.querySelectorAll('[data-view-mode]').forEach(btn => {
+      btn.addEventListener('click', () => { viewMode = btn.dataset.viewMode; App.rerender(); });
+    });
     document.querySelectorAll('[data-owner-filter]').forEach(btn => {
       btn.addEventListener('click', () => { ownerFilter = btn.dataset.ownerFilter; App.rerender(); });
     });
