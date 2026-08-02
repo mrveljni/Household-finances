@@ -115,7 +115,7 @@ const AccountsView = (() => {
       </div>
       <label>Account type</label>
       <select id="f-type">
-        ${['Cash', 'Investment', 'Private Stock', 'Credit Card'].map(t => `<option ${existing?.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        ${['Cash', 'Investment', 'Private Stock', 'Credit Card', 'Liability'].map(t => `<option ${existing?.type === t ? 'selected' : ''}>${t}</option>`).join('')}
       </select>
       <div class="modal-actions">
         ${isEdit ? '<button class="secondary" id="delete-account">Delete</button>' : ''}
