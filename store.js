@@ -80,14 +80,20 @@ const Store = (() => {
     return Number(snap.balance) || 0;
   }
 
+  // Credit cards paid off in full monthly aren't a real asset or liability —
+  // they're only used to tag/track spend, so they're excluded from net worth.
+  function isNetWorthAccount(a) {
+    return a.type !== 'Credit Card';
+  }
+
   function netWorth(ownerFilter) {
-    let accounts = state.accounts;
+    let accounts = state.accounts.filter(isNetWorthAccount);
     if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
     return accounts.reduce((sum, a) => sum + toHomeCurrency(accountValue(a), a.currency), 0);
   }
 
   function netWorthByType(ownerFilter) {
-    let accounts = state.accounts;
+    let accounts = state.accounts.filter(isNetWorthAccount);
     if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
     const byType = {};
     accounts.forEach(a => {
@@ -99,7 +105,7 @@ const Store = (() => {
 
   // Net worth trend by month, using latest snapshot on/before each month-end
   function netWorthTrend(monthsBack = 12, ownerFilter) {
-    let accounts = state.accounts;
+    let accounts = state.accounts.filter(isNetWorthAccount);
     if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
     const months = [];
     const now = new Date();
