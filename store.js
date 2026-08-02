@@ -136,8 +136,65 @@ const Store = (() => {
     return new Intl.NumberFormat('en-CA', { style: 'currency', currency: CONFIG.HOME_CURRENCY, maximumFractionDigits: 0 }).format(amount || 0);
   }
 
+  // ---- Month drill-down helpers (Dashboard) ----
+
+  // All months ('YYYY-MM') that have at least one snapshot, most recent first
+  function snapshotMonthOptions() {
+    const months = new Set(state.snapshots.map(s => (s.date || '').slice(0, 7)).filter(Boolean));
+    return Array.from(months).sort().reverse();
+  }
+
+  function valuesAsOfMonth(monthStr) {
+    const monthEnd = new Date(Number(monthStr.slice(0,4)), Number(monthStr.slice(5,7)), 0);
+    return state.accounts.filter(isNetWorthAccount).map(a => {
+      const snaps = state.snapshots
+        .filter(s => s.accountId === a.id && new Date(s.date) <= monthEnd)
+        .sort((x, y) => new Date(y.date) - new Date(x.date));
+      if (!snaps[0]) return null;
+      const snap = snaps[0];
+      const rawVal = (a.type === 'Private Stock' && snap.shares && snap.pricePerShare)
+        ? Number(snap.shares) * Number(snap.pricePerShare)
+        : Number(snap.balance) || 0;
+      return { account: a, value: toHomeCurrency(rawVal, a.currency) };
+    }).filter(Boolean);
+  }
+
+  function monthBreakdown(monthStr) {
+    const entries = valuesAsOfMonth(monthStr);
+    const byType = {}, byOwner = {};
+    let total = 0;
+    entries.forEach(({ account, value }) => {
+      byType[account.type] = (byType[account.type] || 0) + value;
+      byOwner[account.owner] = (byOwner[account.owner] || 0) + value;
+      total += value;
+    });
+    return { byType, byOwner, total };
+  }
+
+  // Largest expenses within a given month, excluding card-payment transfers
+  function topExpensesForMonth(monthStr, n = 5) {
+    return state.transactions
+      .filter(t => (t.date || '').slice(0, 7) === monthStr && Number(t.amount) < 0 && t.category !== 'Transfer')
+      .sort((a, b) => Number(a.amount) - Number(b.amount))
+      .slice(0, n);
+  }
+
+  // ---- Trends period helpers ----
+
+  function transactionMonthOptions() {
+    const months = new Set(state.transactions.map(t => (t.date || '').slice(0, 7)).filter(Boolean));
+    return Array.from(months).sort().reverse();
+  }
+
+  function transactionsForPeriod(period) {
+    if (!period || period === 'all') return state.transactions;
+    return state.transactions.filter(t => (t.date || '').slice(0, 7) === period);
+  }
+
   return {
     state, loadAll, toHomeCurrency, latestSnapshotFor, accountValue,
-    netWorth, netWorthByType, netWorthTrend, formatMoney
+    netWorth, netWorthByType, netWorthTrend, formatMoney,
+    snapshotMonthOptions, valuesAsOfMonth, monthBreakdown, topExpensesForMonth,
+    transactionMonthOptions, transactionsForPeriod
   };
 })();
