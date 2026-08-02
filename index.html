@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Household Finance Tracker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Finances">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#1F6E5C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <h1>Household Finances</h1>
+    <div class="subtitle" id="header-subtitle">Loading...</div>
+  </header>
+  <main id="main-content"></main>
+  <nav class="tabbar" id="tabbar">
+    <button data-view="dashboard" class="active"><span class="tab-icon">◐</span>Dashboard</button>
+    <button data-view="accounts"><span class="tab-icon">▤</span>Accounts</button>
+    <button data-view="trends"><span class="tab-icon">↗</span>Trends</button>
+    <button data-view="goals"><span class="tab-icon">◈</span>Goals</button>
+    <button data-view="upload"><span class="tab-icon">⇧</span>Upload</button>
+  </nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script src="store.js"></script>
+<script src="views/dashboard.js"></script>
+<script src="views/accounts.js"></script>
+<script src="views/trends.js"></script>
+<script src="views/goals.js"></script>
+<script src="views/upload.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
