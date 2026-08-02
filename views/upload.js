@@ -35,7 +35,7 @@ const UploadView = (() => {
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
             <span class="ledger-sub">${r.date}${r.recurring ? ' \u00b7 recurring' : ''}</span>
             <select data-row-category="${i}" style="width:auto; font-size:0.78rem; padding:4px 6px;">
-              ${categoryOptions(r.category)}
+              ${Categorize.categoryOptions(r.category)}
             </select>
           </div>
         </div>
@@ -53,12 +53,6 @@ const UploadView = (() => {
         <button id="confirm-upload">Save ${parsedRows.filter(r=>r.include).length} Transactions</button>
       </div>
     `;
-  }
-
-  const DEFAULT_CATEGORIES = ['Groceries','Dining','Transport','Daycare','Travel','Utilities','Housing','Shopping','Health','Subscriptions','Income','Transfer','Other'];
-
-  function categoryOptions(selected) {
-    return DEFAULT_CATEGORIES.map(c => `<option ${c === selected ? 'selected' : ''}>${c}</option>`).join('');
   }
 
   function afterRender() {
@@ -80,44 +74,16 @@ const UploadView = (() => {
     const row = parsedRows[index];
     const oldDesc = row.description;
     row.category = newCategory;
-    const keyword = extractKeyword(oldDesc);
-    const matchCount = parsedRows.filter(r => extractKeyword(r.description) === keyword).length;
+    const keyword = Categorize.extractKeyword(oldDesc);
+    const matchCount = parsedRows.filter(r => Categorize.extractKeyword(r.description) === keyword).length;
     if (matchCount > 1) {
       const applyAll = confirm(`Apply "${newCategory}" to all ${matchCount} transactions matching "${keyword}"?`);
       if (applyAll) {
-        parsedRows.forEach(r => { if (extractKeyword(r.description) === keyword) r.category = newCategory; });
+        parsedRows.forEach(r => { if (Categorize.extractKeyword(r.description) === keyword) r.category = newCategory; });
       }
     }
-    await saveRule(keyword, newCategory);
+    await Categorize.saveRule(keyword, newCategory);
     App.rerender();
-  }
-
-  async function saveRule(keyword, category) {
-    if (!keyword) return;
-    const existing = Store.state.categoryRules.find(r => r.keyword && r.keyword.toLowerCase() === keyword.toLowerCase());
-    await Api.upsert('CategoryRules', { id: existing ? existing.id : undefined, keyword, category });
-    if (existing) existing.category = category;
-    else Store.state.categoryRules.push({ id: Api.uuid(), keyword, category });
-  }
-
-  function extractKeyword(description) {
-    const match = (description || '').match(/[A-Za-z]{3,}/);
-    return match ? match[0].toUpperCase() : (description || '').trim().toUpperCase();
-  }
-
-  function autoCategory(description) {
-    const rule = Store.state.categoryRules.find(r =>
-      r.keyword && description.toUpperCase().includes(r.keyword.toUpperCase())
-    );
-    return rule ? rule.category : 'Other';
-  }
-
-  function detectRecurring(description, amount) {
-    const key = extractKeyword(description);
-    const matches = Store.state.transactions.filter(t =>
-      extractKeyword(t.description) === key && Math.abs(Number(t.amount) - amount) < 1
-    );
-    return matches.length >= 1;
   }
 
   async function handleFile(e) {
@@ -146,8 +112,8 @@ const UploadView = (() => {
         date: r.date,
         description: r.description,
         amount: r.amount,
-        category: autoCategory(r.description),
-        recurring: detectRecurring(r.description, r.amount),
+        category: Categorize.autoCategory(r.description),
+        recurring: Categorize.detectRecurring(r.description, r.amount),
         include: true,
         accountId, owner
       }));
