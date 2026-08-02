@@ -15,17 +15,22 @@ const AccountsView = (() => {
 
     const rows = Object.entries(groups).map(([groupName, accts]) => {
       const groupTotal = accts.reduce((sum, a) => sum + Store.toHomeCurrency(Store.accountValue(a), a.currency), 0);
-      const isMultiCurrency = accts.length > 1;
+      const currencies = accts.map(a => a.currency);
+      const allCurrenciesUnique = new Set(currencies).size === currencies.length;
+      // Only collapse into a grouped "fund" view when every account here is a
+      // different currency of the same fund — e.g. a CAD/EUR/USD cash stash.
+      // Accounts that merely share an institution name (two TD accounts, both CAD)
+      // stay listed individually so their real names aren't hidden.
+      const isMultiCurrencyFund = accts.length > 1 && allCurrenciesUnique;
 
       const acctRows = accts.map(a => {
-        const val = Store.toHomeCurrency(Store.accountValue(a), a.currency);
         const snap = Store.latestSnapshotFor(a.id);
         return `
           <div class="ledger-row" data-account-id="${a.id}">
             <div class="ledger-main">
               <span class="owner-dot ${ownerClass(a.owner)}"></span>
-              <span class="ledger-name">${isMultiCurrency ? a.currency : a.name}</span>
-              <span class="ledger-sub">${isMultiCurrency ? '' : (a.institution || '')}</span>
+              <span class="ledger-name">${isMultiCurrencyFund ? a.currency : a.name}</span>
+              <span class="ledger-sub">${isMultiCurrencyFund ? '' : (a.institution || '')}</span>
             </div>
             <div style="text-align:right;">
               <div class="ledger-amount num">${new Intl.NumberFormat('en-CA', {style:'currency', currency: a.currency}).format(Store.accountValue(a))}</div>
@@ -35,7 +40,7 @@ const AccountsView = (() => {
         `;
       }).join('');
 
-      if (!isMultiCurrency) return acctRows;
+      if (!isMultiCurrencyFund) return acctRows;
 
       return `
         <div style="margin-bottom:4px;">
