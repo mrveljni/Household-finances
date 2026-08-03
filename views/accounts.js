@@ -9,12 +9,48 @@ const AccountsView = (() => {
         <button class="pill ${viewMode === 'institution' ? 'active' : ''}" data-view-mode="institution">By Institution</button>
       </div>
     `;
-    return modeToggle + (viewMode === 'institution' ? renderByInstitution() : renderByOwner());
+    return renderMatrix() + modeToggle + (viewMode === 'institution' ? renderByInstitution() : renderByOwner());
+  }
+
+  function renderMatrix() {
+    const matrix = Store.institutionOwnerMatrix();
+    if (!matrix.length) return '';
+    const rows = matrix.map(row => `
+      <tr>
+        <td style="padding:7px 4px; font-size:0.82rem;">${row.inst}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.78rem; color:var(--owner-mine);">${shortMoney(row.Mine)}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.78rem; color:var(--owner-his);">${shortMoney(row.His)}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.78rem; color:var(--owner-joint);">${shortMoney(row.Joint)}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.82rem; font-weight:700;">${shortMoney(row.total)}</td>
+      </tr>
+    `).join('');
+    return `
+      <div class="card">
+        <h3>Institution × Owner</h3>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="text-align:left; padding:4px; font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Institution</th>
+              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-mine); text-transform:uppercase;">Mine</th>
+              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-his); text-transform:uppercase;">His</th>
+              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-joint); text-transform:uppercase;">Joint</th>
+              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function shortMoney(v) {
+    if (!v) return '—';
+    return new Intl.NumberFormat('en-CA', { style: 'currency', currency: CONFIG.HOME_CURRENCY, maximumFractionDigits: 0, notation: 'compact' }).format(v);
   }
 
   function renderByInstitution() {
     const groups = {};
-    Store.state.accounts.forEach(a => {
+    Store.state.accounts.filter(a => a.type !== 'Credit Card').forEach(a => {
       const key = a.institution || 'Unspecified';
       if (!groups[key]) groups[key] = [];
       groups[key].push(a);
@@ -54,9 +90,10 @@ const AccountsView = (() => {
   }
 
   function renderByOwner() {
-    const filtered = ownerFilter === 'All'
+    const filtered = (ownerFilter === 'All'
       ? Store.state.accounts
-      : Store.state.accounts.filter(a => a.owner === ownerFilter);
+      : Store.state.accounts.filter(a => a.owner === ownerFilter)
+    ).filter(a => a.type !== 'Credit Card');
 
     const groups = {};
     filtered.forEach(a => {
@@ -77,11 +114,13 @@ const AccountsView = (() => {
 
       const acctRows = accts.map(a => {
         const snap = Store.latestSnapshotFor(a.id);
+        const restricted = !Store.isLiquid(a);
         return `
           <div class="ledger-row" data-account-id="${a.id}">
             <div class="ledger-main">
               <span class="owner-dot ${ownerClass(a.owner)}"></span>
               <span class="ledger-name">${isMultiCurrencyFund ? a.currency : a.name}</span>
+              ${restricted ? '<span class="pill" style="margin-left:6px;">🔒 restricted</span>' : ''}
               <span class="ledger-sub">${isMultiCurrencyFund ? '' : (a.institution || '')}</span>
             </div>
             <div style="text-align:right;">

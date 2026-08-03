@@ -30,7 +30,7 @@ const TrendsView = (() => {
       .sort((a, b) => Number(b.amount) - Number(a.amount))
       .slice(0, 3);
 
-    const recurring = dedupeRecurring(txns.filter(t => isRecurring(t.recurring)));
+    const recurring = Store.recurringSummary(12, 2).filter(g => !isHidden(g.keyword));
 
     return `
       <div class="filter-row">
@@ -47,16 +47,20 @@ const TrendsView = (() => {
 
       <div class="card">
         <h3>Recurring Subscriptions</h3>
-        <div class="ledger-sub" style="margin-bottom:6px;">Flagged as repeating — worth a quick review.</div>
-        ${recurring.length ? recurring.map(t => `
+        <div class="ledger-sub" style="margin-bottom:6px;">Detected from at least 3 months of activity in the trailing 12 — drops off on its own after 2 months of no charge.</div>
+        ${recurring.length ? recurring.map(g => `
           <div class="ledger-row">
             <div class="ledger-main">
-              <span class="ledger-name">${t.description}</span>
-              <span class="ledger-sub">${t.category} · last ${t.date ? new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''}</span>
+              <span class="ledger-name">${g.latest.description}</span>
+              <span class="ledger-sub">${g.category} · ${g.months.size} of last 12 months · last ${new Date(g.latest.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
             </div>
-            <div class="ledger-amount num">${Store.formatMoney(Math.abs(t.amount))}</div>
+            <div style="text-align:right;">
+              <div class="ledger-amount num">${Store.formatMoney(g.total)}<span class="ledger-sub"> /12mo</span></div>
+              <button class="ghost" data-hide-keyword="${g.keyword}" style="font-size:0.7rem; padding:2px 4px;">Not recurring</button>
+            </div>
           </div>
         `).join('') : '<div class="empty-state">None detected in this period</div>'}
+        ${hiddenKeywords().length ? `<a class="link" id="show-hidden-link" style="display:block; margin-top:10px;">${hiddenKeywords().length} hidden — show again</a>` : ''}
       </div>
 
       <div class="card">
@@ -95,20 +99,24 @@ const TrendsView = (() => {
     return new Date(Number(p.slice(0,4)), Number(p.slice(5,7))-1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }
 
-  function isRecurring(val) {
-    return val === true || val === 'TRUE' || val === 'true';
+  const HIDE_KEY = 'hft_hidden_recurring_keywords';
+
+  function hiddenKeywords() {
+    try { return JSON.parse(localStorage.getItem(HIDE_KEY) || '[]'); } catch { return []; }
   }
 
-  // One row per merchant keyword, keeping the most recent occurrence
-  function dedupeRecurring(txns) {
-    const byKeyword = {};
-    txns.forEach(t => {
-      const key = Categorize.extractKeyword(t.description);
-      if (!byKeyword[key] || new Date(t.date) > new Date(byKeyword[key].date)) {
-        byKeyword[key] = t;
-      }
-    });
-    return Object.values(byKeyword).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  function isHidden(keyword) {
+    return hiddenKeywords().includes(keyword);
+  }
+
+  function hideKeyword(keyword) {
+    const list = hiddenKeywords();
+    if (!list.includes(keyword)) list.push(keyword);
+    localStorage.setItem(HIDE_KEY, JSON.stringify(list));
+  }
+
+  function clearHidden() {
+    localStorage.removeItem(HIDE_KEY);
   }
 
   function afterRender() {
@@ -116,6 +124,10 @@ const TrendsView = (() => {
       period = e.target.value;
       App.rerender();
     });
+    document.querySelectorAll('[data-hide-keyword]').forEach(btn => {
+      btn.addEventListener('click', () => { hideKeyword(btn.dataset.hideKeyword); App.rerender(); });
+    });
+    document.getElementById('show-hidden-link')?.addEventListener('click', () => { clearHidden(); App.rerender(); });
   }
 
   return { render, afterRender };

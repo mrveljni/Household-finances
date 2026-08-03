@@ -4,6 +4,7 @@ const DashboardView = (() => {
 
   function render() {
     const nw = Store.netWorth('All');
+    const liquidNw = Store.liquidNetWorth('All');
     const byType = Store.netWorthByType('All');
     const trend = Store.netWorthTrend(12, 'All');
 
@@ -28,6 +29,10 @@ const DashboardView = (() => {
         <h3>Household Net Worth</h3>
         <div class="big-number num">${Store.formatMoney(nw)}</div>
         <span class="delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Store.formatMoney(Math.abs(delta))} (${Math.abs(deltaPct).toFixed(1)}%) this month</span>
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+          <span class="ledger-sub">Liquid (excl. RRSP/RESP/pension)</span>
+          <span class="ledger-amount num">${Store.formatMoney(liquidNw)}</span>
+        </div>
         <div class="chart-wrap"><canvas id="nw-chart"></canvas></div>
       </div>
 
@@ -35,6 +40,8 @@ const DashboardView = (() => {
         <h3>By Asset Type</h3>
         ${typeRows || emptyRow('No accounts yet — add one under Accounts')}
       </div>
+
+      ${renderPerPerson()}
 
       ${renderMonthDrilldown()}
 
@@ -49,6 +56,36 @@ const DashboardView = (() => {
       <div class="card">
         <h3>Goals</h3>
         ${goalsHtml}
+      </div>
+    `;
+  }
+
+  function renderPerPerson() {
+    const breakdown = Store.perPersonTypeBreakdown();
+    const owners = ['Mine', 'His', 'Joint'];
+    const rows = owners.map(o => {
+      const { cash, investment } = breakdown[o];
+      return `
+        <div style="margin-bottom:12px;">
+          <div style="display:flex; align-items:center; margin-bottom:6px;">
+            <span class="owner-dot ${o==='Mine'?'mine':o==='His'?'his':'joint'}"></span>
+            <span class="ledger-name" style="font-weight:700;">${o}</span>
+          </div>
+          <div class="ledger-row" style="padding:4px 0;">
+            <div class="ledger-sub">Cash</div>
+            <div class="ledger-amount num">${Store.formatMoney(cash)}</div>
+          </div>
+          <div class="ledger-row" style="padding:4px 0;">
+            <div class="ledger-sub">Investments</div>
+            <div class="ledger-amount num">${Store.formatMoney(investment)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="card">
+        <h3>Cash vs. Investments by Person</h3>
+        ${rows}
       </div>
     `;
   }
