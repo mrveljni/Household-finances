@@ -179,7 +179,84 @@ const Store = (() => {
       .slice(0, n);
   }
 
-  // ---- Trends period helpers ----
+  // ---- Liquidity ----
+  // RRSP/RESP/pension accounts carry withdrawal penalties/taxes and aren't
+  // real "reach for it today" cash, unlike chequing/savings/TFSA. Detected
+  // from the account name so no sheet schema change is needed.
+  function isLiquid(account) {
+    return !/RRSP|RESP|pension/i.test(account.name || '');
+  }
+
+  function liquidNetWorth(ownerFilter) {
+    let accounts = state.accounts.filter(isNetWorthAccount).filter(isLiquid);
+    if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
+    return accounts.reduce((sum, a) => sum + toHomeCurrency(accountValue(a), a.currency), 0);
+  }
+
+  // ---- Per-person Cash vs Investment ----
+  function perPersonTypeBreakdown() {
+    const owners = ['Mine', 'His', 'Joint'];
+    const result = {};
+    owners.forEach(o => {
+      const accounts = state.accounts.filter(isNetWorthAccount).filter(a => a.owner === o);
+      let cash = 0, investment = 0;
+      accounts.forEach(a => {
+        const val = toHomeCurrency(accountValue(a), a.currency);
+        if (a.type === 'Cash') cash += val;
+        else if (a.type === 'Investment' || a.type === 'Private Stock') investment += val;
+      });
+      result[o] = { cash, investment };
+    });
+    return result;
+  }
+
+  // ---- Institution x Owner matrix (excludes Credit Card — always $0, not useful here) ----
+  function institutionOwnerMatrix() {
+    const owners = ['Mine', 'His', 'Joint'];
+    const accounts = state.accounts.filter(a => a.type !== 'Credit Card');
+    const byInstitution = {};
+    accounts.forEach(a => {
+      const inst = a.institution || 'Unspecified';
+      if (!byInstitution[inst]) {
+        byInstitution[inst] = { Mine: 0, His: 0, Joint: 0, total: 0 };
+      }
+      const val = toHomeCurrency(accountValue(a), a.currency);
+      byInstitution[inst][a.owner] = (byInstitution[inst][a.owner] || 0) + val;
+      byInstitution[inst].total += val;
+    });
+    return Object.entries(byInstitution)
+      .map(([inst, vals]) => ({ inst, ...vals }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  // ---- Rolling 12-month recurring detection ----
+  // A merchant counts as "recurring" if it shows up in at least 3 distinct
+  // months within the trailing window, and drops off automatically if it
+  // hasn't recurred in the last `dropoffMonths` — no stale flags to manage.
+  function recurringSummary(windowMonths = 12, dropoffMonths = 2) {
+    const now = new Date();
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - windowMonths, now.getDate());
+    const dropoff = new Date(now.getFullYear(), now.getMonth() - dropoffMonths, now.getDate());
+
+    const spend = state.transactions.filter(t =>
+      Number(t.amount) < 0 && t.category !== 'Transfer' && t.date && new Date(t.date) >= cutoff
+    );
+
+    const byKeyword = {};
+    spend.forEach(t => {
+      const kw = Categorize.extractKeyword(t.description);
+      if (!byKeyword[kw]) byKeyword[kw] = { keyword: kw, months: new Set(), total: 0, latest: t, category: t.category, count: 0 };
+      const g = byKeyword[kw];
+      g.months.add((t.date || '').slice(0, 7));
+      g.total += Math.abs(Number(t.amount));
+      g.count += 1;
+      if (new Date(t.date) > new Date(g.latest.date)) g.latest = t;
+    });
+
+    return Object.values(byKeyword)
+      .filter(g => g.months.size >= 3 && new Date(g.latest.date) >= dropoff)
+      .sort((a, b) => b.total - a.total);
+  }
 
   function transactionMonthOptions() {
     const months = new Set(state.transactions.map(t => (t.date || '').slice(0, 7)).filter(Boolean));
@@ -195,6 +272,7 @@ const Store = (() => {
     state, loadAll, toHomeCurrency, latestSnapshotFor, accountValue,
     netWorth, netWorthByType, netWorthTrend, formatMoney,
     snapshotMonthOptions, valuesAsOfMonth, monthBreakdown, topExpensesForMonth,
-    transactionMonthOptions, transactionsForPeriod
+    transactionMonthOptions, transactionsForPeriod,
+    isLiquid, liquidNetWorth, perPersonTypeBreakdown, institutionOwnerMatrix, recurringSummary
   };
 })();
