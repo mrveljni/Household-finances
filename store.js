@@ -96,7 +96,7 @@ const Store = (() => {
   }
 
   function netWorthByType(ownerFilter) {
-    let accounts = state.accounts.filter(isNetWorthAccount);
+    let accounts = state.accounts.filter(isLiquidNetWorthAccount);
     if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
     const byType = {};
     accounts.forEach(a => {
@@ -108,7 +108,7 @@ const Store = (() => {
 
   // Net worth trend by month, using latest snapshot on/before each month-end
   function netWorthTrend(monthsBack = 12, ownerFilter) {
-    let accounts = state.accounts.filter(isNetWorthAccount);
+    let accounts = state.accounts.filter(isLiquidNetWorthAccount);
     if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
     const months = [];
     const now = new Date();
@@ -149,7 +149,7 @@ const Store = (() => {
 
   function valuesAsOfMonth(monthStr) {
     const monthEnd = new Date(Number(monthStr.slice(0,4)), Number(monthStr.slice(5,7)), 0);
-    return state.accounts.filter(isNetWorthAccount).map(a => {
+    return state.accounts.filter(isLiquidNetWorthAccount).map(a => {
       const snaps = state.snapshots
         .filter(s => s.accountId === a.id && new Date(s.date) <= monthEnd)
         .sort((x, y) => new Date(y.date) - new Date(x.date));
@@ -183,17 +183,68 @@ const Store = (() => {
   }
 
   // ---- Liquidity ----
-  // RRSP/RESP/pension accounts carry withdrawal penalties/taxes and aren't
-  // real "reach for it today" cash, unlike chequing/savings/TFSA. Detected
-  // from the account name so no sheet schema change is needed.
+  // RRSP/RESP/pension accounts carry withdrawal penalties/taxes, and accounts
+  // named as a "business" account aren't household liquid net worth either
+  // (e.g. a spouse's business account). Both are detected from the account
+  // name so no sheet schema change is needed.
   function isLiquid(account) {
     return !/RRSP|RESP|pension/i.test(account.name || '');
   }
 
-  function liquidNetWorth(ownerFilter) {
-    let accounts = state.accounts.filter(isNetWorthAccount).filter(isLiquid);
+  function isBusinessAccount(account) {
+    return /business/i.test(account.name || '') || /business/i.test(account.institution || '');
+  }
+
+  function isLiquidNetWorthAccount(a) {
+    return isNetWorthAccount(a) && isLiquid(a) && !isBusinessAccount(a);
+  }
+
+  // Net Worth is liquid-only by default per household preference — RRSP/RESP,
+  // pension, business accounts, and Credit Cards are all excluded. Use
+  // totalNetWorthIncludingRestricted() for the full picture including those.
+  function netWorth(ownerFilter) {
+    let accounts = state.accounts.filter(isLiquidNetWorthAccount);
     if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
     return accounts.reduce((sum, a) => sum + toHomeCurrency(accountValue(a), a.currency), 0);
+  }
+
+  function totalNetWorthIncludingRestricted(ownerFilter) {
+    let accounts = state.accounts.filter(isNetWorthAccount);
+    if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
+    return accounts.reduce((sum, a) => sum + toHomeCurrency(accountValue(a), a.currency), 0);
+  }
+
+  // Accounts excluded from the liquid Net Worth figure, with reason — for the
+  // "what got excluded" info panel so the number is verifiable, not a black box.
+  function excludedFromNetWorth(ownerFilter) {
+    let accounts = state.accounts.filter(isNetWorthAccount).filter(a => !isLiquidNetWorthAccount(a));
+    if (ownerFilter && ownerFilter !== 'All') accounts = accounts.filter(a => a.owner === ownerFilter);
+    return accounts.map(a => ({
+      account: a,
+      value: toHomeCurrency(accountValue(a), a.currency),
+      reason: isBusinessAccount(a) ? 'Business account' : 'Restricted (RRSP/RESP/pension)'
+    }));
+  }
+
+  function liquidNetWorth(ownerFilter) {
+    return netWorth(ownerFilter); // kept for backwards compatibility with existing call sites
+  }
+
+  // ---- Account sub-type (Chequing/TFSA/RRSP/etc), inferred from the name ----
+  function accountSubtype(account) {
+    const n = account.name || '';
+    if (/chequing/i.test(n)) return 'Chequing';
+    if (/tfsa/i.test(n)) return 'TFSA';
+    if (/rrsp/i.test(n)) return 'RRSP';
+    if (/resp/i.test(n)) return 'RESP';
+    if (/crypto/i.test(n)) return 'Crypto';
+    if (/nsa/i.test(n)) return 'Non-Registered';
+    if (/heloc/i.test(n)) return 'HELOC';
+    if (/saving/i.test(n)) return 'Savings';
+    if (/cash fund/i.test(n)) return 'Cash Fund';
+    if (account.type === 'Private Stock') return 'Private Stock';
+    if (account.type === 'Credit Card') return 'Credit Card';
+    return account.type || 'Other';
   }
 
   // ---- Per-person Cash vs Investment ----
@@ -201,7 +252,7 @@ const Store = (() => {
     const owners = ['Mine', 'His', 'Joint'];
     const result = {};
     owners.forEach(o => {
-      const accounts = state.accounts.filter(isNetWorthAccount).filter(a => a.owner === o);
+      const accounts = state.accounts.filter(isLiquidNetWorthAccount).filter(a => a.owner === o);
       let cash = 0, investment = 0;
       accounts.forEach(a => {
         const val = toHomeCurrency(accountValue(a), a.currency);
@@ -276,6 +327,8 @@ const Store = (() => {
     netWorth, netWorthByType, netWorthTrend, formatMoney,
     snapshotMonthOptions, valuesAsOfMonth, monthBreakdown, topExpensesForMonth,
     transactionMonthOptions, transactionsForPeriod,
-    isLiquid, liquidNetWorth, perPersonTypeBreakdown, institutionOwnerMatrix, recurringSummary
+    isLiquid, isBusinessAccount, isLiquidNetWorthAccount, liquidNetWorth,
+    totalNetWorthIncludingRestricted, excludedFromNetWorth,
+    perPersonTypeBreakdown, institutionOwnerMatrix, accountSubtype, recurringSummary
   };
 })();
