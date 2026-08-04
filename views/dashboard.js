@@ -1,18 +1,18 @@
 const DashboardView = (() => {
   let chartInstance = null;
-  let selectedMonth = null; // 'YYYY-MM' or null = latest
+  let selectedMonth = null;
+  let liquidPanelOpen = false;
 
   function render() {
     const nw = Store.netWorth('All');
     const totalIncl = Store.totalNetWorthIncludingRestricted('All');
-    const excluded = Store.excludedFromNetWorth('All');
-    const byType = Store.netWorthByType('All');
     const trend = Store.netWorthTrend(12, 'All');
 
     const prevMonth = trend.length > 1 ? trend[trend.length - 2].value : nw;
     const delta = nw - prevMonth;
     const deltaPct = prevMonth ? (delta / prevMonth * 100) : 0;
 
+    const byType = Store.netWorthByType('All');
     const typeRows = Object.entries(byType)
       .sort((a, b) => b[1] - a[1])
       .map(([type, val]) => `
@@ -22,19 +22,6 @@ const DashboardView = (() => {
         </div>
       `).join('');
 
-    const goalsHtml = renderGoalsSummary();
-    const prediction = computeYearEndPrediction();
-
-    const excludedRows = excluded.map(e => `
-      <div class="ledger-row">
-        <div class="ledger-main">
-          <span class="ledger-name">${e.account.name}</span>
-          <span class="ledger-sub">${e.reason}</span>
-        </div>
-        <div class="ledger-amount num">${Store.formatMoney(e.value)}</div>
-      </div>
-    `).join('') || '<div class="empty-state">Nothing excluded</div>';
-
     return `
       <div class="card">
         <div style="display:flex; align-items:baseline; gap:6px;">
@@ -43,10 +30,9 @@ const DashboardView = (() => {
         </div>
         <div class="big-number num">${Store.formatMoney(nw)}</div>
         <span class="delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Store.formatMoney(Math.abs(delta))} (${Math.abs(deltaPct).toFixed(1)}%) this month</span>
-        <div id="nw-info-panel" style="display:none; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
-          <div class="ledger-sub" style="margin-bottom:6px;">Excluded from Liquid Net Worth (${Store.formatMoney(totalIncl - nw)} total):</div>
-          ${excludedRows}
-          <div class="ledger-sub" style="margin-top:8px;">Total incl. these: <span class="num">${Store.formatMoney(totalIncl)}</span></div>
+        <div id="nw-info-panel" style="display:${liquidPanelOpen ? 'block' : 'none'}; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+          <div class="ledger-sub" style="margin-bottom:6px;">Total including restricted/excluded: <span class="num">${Store.formatMoney(totalIncl)}</span></div>
+          ${renderLiquidChecklist()}
         </div>
         <div class="chart-wrap"><canvas id="nw-chart"></canvas></div>
       </div>
@@ -61,18 +47,31 @@ const DashboardView = (() => {
       ${renderMonthDrilldown()}
 
       <div class="card">
-        <h3>Year-End Savings Estimate</h3>
-        <div class="big-number num">${Store.formatMoney(prediction.yearEndEstimate)}</div>
-        <div style="color:var(--text-muted); font-size:0.82rem; margin-top:4px;">
-          Based on avg. monthly change of ${Store.formatMoney(prediction.avgMonthlyChange)}, minus ${Store.formatMoney(prediction.remainingPlannedExpenses)} in planned expenses through year end.
-        </div>
-      </div>
-
-      <div class="card">
         <h3>Goals</h3>
-        ${goalsHtml}
+        ${renderGoalsSummary()}
       </div>
     `;
+  }
+
+  function renderLiquidChecklist() {
+    const list = Store.liquidToggleList().sort((a, b) => a.account.name.localeCompare(b.account.name));
+    const rows = list.map(({ account, included }) => `
+      <div class="ledger-row" style="padding:6px 0;">
+        <div class="ledger-main">
+          <span class="owner-dot ${account.owner==='Mine'?'mine':account.owner==='His'?'his':'joint'}"></span>
+          <span class="ledger-name">${account.name}</span>
+        </div>
+        <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-muted);">
+          <input type="checkbox" data-liquid-toggle="${account.id}" ${included ? 'checked' : ''} style="width:auto;">
+          counts as liquid
+        </label>
+      </div>
+    `).join('');
+    return `<details><summary style="cursor:pointer; font-size:0.82rem; color:var(--accent); font-weight:600;">Customize which accounts count →</summary><div style="margin-top:8px;">${rows}</div></details>`;
+  }
+
+  function emptyRow(msg) {
+    return `<div class="empty-state">${msg}</div>`;
   }
 
   function renderPerPerson() {
@@ -84,7 +83,7 @@ const DashboardView = (() => {
         <div style="margin-bottom:12px;">
           <div style="display:flex; align-items:center; margin-bottom:6px;">
             <span class="owner-dot ${o==='Mine'?'mine':o==='His'?'his':'joint'}"></span>
-            <span class="ledger-name" style="font-weight:700;">${o}</span>
+            <span class="ledger-name" style="font-weight:700;">${Store.ownerLabel(o)}</span>
           </div>
           <div class="ledger-row" style="padding:4px 0;">
             <div class="ledger-sub">Cash</div>
@@ -109,27 +108,21 @@ const DashboardView = (() => {
     const months = Store.snapshotMonthOptions();
     if (!months.length) return '';
     const month = selectedMonth && months.includes(selectedMonth) ? selectedMonth : months[0];
-    const { byType, byOwner, total } = Store.monthBreakdown(month);
+    const matrix = Store.monthBreakdownMatrix(month);
+    const total = matrix.reduce((s, r) => s + r.total, 0);
     const topExpenses = Store.topExpensesForMonth(month, 5);
 
     const monthLabel = new Date(Number(month.slice(0,4)), Number(month.slice(5,7))-1, 1)
       .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-    const typeRows = Object.entries(byType).sort((a,b) => b[1]-a[1]).map(([t, v]) => `
-      <div class="ledger-row">
-        <div class="ledger-main"><span class="ledger-name">${t}</span></div>
-        <div class="ledger-amount num">${Store.formatMoney(v)}</div>
-      </div>
-    `).join('') || emptyRow('No data for this month');
-
-    const ownerRows = ['Mine','His','Joint'].map(o => `
-      <div class="ledger-row">
-        <div class="ledger-main">
-          <span class="owner-dot ${o==='Mine'?'mine':o==='His'?'his':'joint'}"></span>
-          <span class="ledger-name">${o}</span>
-        </div>
-        <div class="ledger-amount num">${Store.formatMoney(byOwner[o] || 0)}</div>
-      </div>
+    const matrixRows = matrix.map(row => `
+      <tr>
+        <td style="padding:7px 4px; font-size:0.82rem;">${row.type}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.78rem; color:var(--owner-mine);">${shortMoney(row.Mine)}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.78rem; color:var(--owner-his);">${shortMoney(row.His)}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.78rem; color:var(--owner-joint);">${shortMoney(row.Joint)}</td>
+        <td class="num" style="text-align:right; padding:7px 4px; font-size:0.82rem; font-weight:700;">${shortMoney(row.total)}</td>
+      </tr>
     `).join('');
 
     const expenseRows = topExpenses.map(t => `
@@ -151,13 +144,20 @@ const DashboardView = (() => {
           </select>
         </div>
         <div class="ledger-sub" style="margin-bottom:2px;">${monthLabel} total</div>
-        <div class="big-number num" style="font-size:1.5rem;">${Store.formatMoney(total)}</div>
+        <div class="big-number num" style="font-size:1.5rem; margin-bottom:12px;">${Store.formatMoney(total)}</div>
 
-        <div class="section-label">By Asset Type</div>
-        ${typeRows}
-
-        <div class="section-label">By Owner</div>
-        ${ownerRows}
+        <table style="width:100%; border-collapse:collapse; margin-bottom:14px;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);">
+              <th style="text-align:left; padding:4px; font-size:0.68rem; color:var(--text-muted); text-transform:uppercase;">Type</th>
+              <th style="text-align:right; padding:4px; font-size:0.68rem; color:var(--owner-mine); text-transform:uppercase;">Niki</th>
+              <th style="text-align:right; padding:4px; font-size:0.68rem; color:var(--owner-his); text-transform:uppercase;">Nico</th>
+              <th style="text-align:right; padding:4px; font-size:0.68rem; color:var(--owner-joint); text-transform:uppercase;">Joint</th>
+              <th style="text-align:right; padding:4px; font-size:0.68rem; color:var(--text-muted); text-transform:uppercase;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${matrixRows}</tbody>
+        </table>
 
         <div class="section-label">Top 5 Expenses</div>
         ${expenseRows}
@@ -165,8 +165,9 @@ const DashboardView = (() => {
     `;
   }
 
-  function emptyRow(msg) {
-    return `<div class="empty-state">${msg}</div>`;
+  function shortMoney(v) {
+    if (!v) return '—';
+    return new Intl.NumberFormat('en-CA', { style: 'currency', currency: CONFIG.HOME_CURRENCY, maximumFractionDigits: 0, notation: 'compact' }).format(v);
   }
 
   function renderGoalsSummary() {
@@ -185,27 +186,6 @@ const DashboardView = (() => {
         </div>
       `;
     }).join('') + `<a class="link" data-view-link="goals">View all goals →</a>`;
-  }
-
-  function computeYearEndPrediction() {
-    const trend = Store.netWorthTrend(6, 'All');
-    const changes = [];
-    for (let i = 1; i < trend.length; i++) changes.push(trend[i].value - trend[i - 1].value);
-    const avgMonthlyChange = changes.length ? changes.reduce((a, b) => a + b, 0) / changes.length : 0;
-
-    const now = new Date();
-    const monthsRemaining = 12 - now.getMonth() - 1;
-    const currentNw = Store.netWorth('All');
-
-    const remainingPlannedExpenses = Store.state.plannedExpenses
-      .filter(pe => {
-        const d = new Date(pe.period);
-        return d.getFullYear() === now.getFullYear() && d.getMonth() >= now.getMonth();
-      })
-      .reduce((sum, pe) => sum + Number(pe.amount || 0), 0);
-
-    const yearEndEstimate = currentNw + (avgMonthlyChange * monthsRemaining) - remainingPlannedExpenses;
-    return { yearEndEstimate, avgMonthlyChange, remainingPlannedExpenses };
   }
 
   function afterRender() {
@@ -239,8 +219,18 @@ const DashboardView = (() => {
     }
 
     document.getElementById('nw-info-btn')?.addEventListener('click', () => {
-      const panel = document.getElementById('nw-info-panel');
-      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      liquidPanelOpen = !liquidPanelOpen;
+      App.rerender();
+    });
+
+    document.querySelectorAll('[data-liquid-toggle]').forEach(el => {
+      el.addEventListener('change', async () => {
+        const account = Store.state.accounts.find(a => a.id === el.dataset.liquidToggle);
+        App.showSaving();
+        await Store.setLiquidOverride(account, el.checked ? 'Yes' : 'No');
+        await Store.loadAll();
+        App.rerender();
+      });
     });
 
     document.getElementById('month-select')?.addEventListener('change', (e) => {

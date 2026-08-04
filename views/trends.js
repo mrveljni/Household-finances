@@ -6,8 +6,14 @@ const TrendsView = (() => {
 
   function threeMonthCategoryData() {
     const now = new Date();
-    const months = [0, 1, 2].map(i => new Date(now.getFullYear(), now.getMonth() - (2 - i), 1));
-    const monthKeys = months.map(d => d.toISOString().slice(0, 7));
+    const currentKey = now.toISOString().slice(0, 7);
+    const hasCurrentMonthData = Store.state.transactions.some(t => (t.date || '').slice(0, 7) === currentKey);
+    // Skip the current month unless it actually has data yet, so a nearly-empty
+    // in-progress month doesn't make everything look like a cliff.
+    const endOffset = hasCurrentMonthData ? 0 : 1;
+    const ordered = [0, 1, 2].map(i => new Date(now.getFullYear(), now.getMonth() - (2 - i) - endOffset, 1));
+    const monthKeys = ordered.map(d => d.toISOString().slice(0, 7));
+
     const byCatMonth = {};
     Store.state.transactions.forEach(t => {
       if (Number(t.amount) >= 0 || t.category === 'Transfer') return;
@@ -20,7 +26,7 @@ const TrendsView = (() => {
       .map(([cat, vals]) => ({ cat, total: vals.reduce((a, b) => a + b, 0), vals }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 6);
-    return { labels: months.map(d => d.toLocaleDateString('en-US', { month: 'short' })), series: top };
+    return { labels: ordered.map(d => d.toLocaleDateString('en-US', { month: 'short' })), series: top };
   }
 
   function render() {
@@ -45,7 +51,7 @@ const TrendsView = (() => {
     const topExpenses = txns
       .filter(t => Number(t.amount) < 0 && t.category !== 'Transfer')
       .sort((a, b) => Number(a.amount) - Number(b.amount))
-      .slice(0, 10);
+      .slice(0, 7);
 
     const topRefunds = txns
       .filter(t => Number(t.amount) > 0 && t.category !== 'Transfer' && t.category !== 'Income')
@@ -75,7 +81,7 @@ const TrendsView = (() => {
 
       <div class="card">
         <h3>Recurring Subscriptions</h3>
-        <div class="ledger-sub" style="margin-bottom:6px;">Detected from at least 3 months of activity in the trailing 12 — drops off on its own after 2 months of no charge.</div>
+        <div class="ledger-sub" style="margin-bottom:6px;">Detected from 3+ months of activity in the trailing 12 — drops off after 2 months of no charge.</div>
         ${recurring.length ? recurring.map(g => `
           <div class="ledger-row">
             <div class="ledger-main">
@@ -83,7 +89,8 @@ const TrendsView = (() => {
               <span class="ledger-sub">${g.category} · ${g.months.size} of last 12 months · last ${new Date(g.latest.date).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
             </div>
             <div style="text-align:right;">
-              <div class="ledger-amount num">${Store.formatMoney(g.total)}<span class="ledger-sub"> /12mo</span></div>
+              <div class="ledger-amount num">${Store.formatMoney(Math.abs(g.latest.amount))}<span class="ledger-sub"> /mo</span></div>
+              <div class="ledger-sub num">${Store.formatMoney(g.total)} /12mo</div>
               <button class="ghost" data-hide-keyword="${g.keyword}" style="font-size:0.7rem; padding:2px 4px;">Not recurring</button>
             </div>
           </div>
@@ -92,7 +99,7 @@ const TrendsView = (() => {
       </div>
 
       <div class="card">
-        <h3>Top 10 Highest Expenses</h3>
+        <h3>Top 7 Highest Expenses</h3>
         ${topExpenses.length ? topExpenses.map(t => `
           <div class="ledger-row">
             <div class="ledger-main">
@@ -117,9 +124,27 @@ const TrendsView = (() => {
         `).join('') : '<div class="empty-state">None in this period</div>'}
       </div>
 
-      <div class="card">
-        <div class="empty-state">Threshold and smart trend alerts land in a future update.</div>
+      ${renderRuleManager()}
+    `;
+  }
+
+  function renderRuleManager() {
+    const rules = Store.state.categoryRules.slice().sort((a, b) => (a.keyword || '').localeCompare(b.keyword || ''));
+    const rows = rules.map(r => `
+      <div class="ledger-row" style="flex-wrap:wrap; gap:6px;" data-rule-id="${r.id}">
+        <input data-rule-keyword="${r.id}" value="${r.keyword || ''}" style="flex:1; min-width:90px; font-size:0.82rem; padding:6px;">
+        <select data-rule-matchtype="${r.id}" style="width:auto; font-size:0.78rem; padding:5px;">${Categorize.matchTypeOptions(r.matchType)}</select>
+        <select data-rule-category="${r.id}" style="width:auto; font-size:0.78rem; padding:5px;">${Categorize.categoryOptions(r.category)}</select>
+        <button class="ghost" data-rule-delete="${r.id}" style="font-size:0.75rem;">✕</button>
       </div>
+    `).join('');
+
+    return `
+      <details class="card">
+        <summary style="cursor:pointer; font-family:'Fraunces',serif; font-weight:600; font-size:1.05rem;">Category Rules (${rules.length})</summary>
+        <div class="ledger-sub" style="margin:8px 0;">Edit how transactions get auto-categorized. Changes apply to future uploads.</div>
+        ${rows || '<div class="empty-state">No rules yet — they get created automatically as you categorize transactions</div>'}
+      </details>
     `;
   }
 
@@ -181,6 +206,7 @@ const TrendsView = (() => {
       period = e.target.value;
       App.rerender();
     });
+
     document.querySelectorAll('[data-hide-keyword]').forEach(btn => {
       btn.addEventListener('click', async () => {
         App.showSaving();
@@ -192,6 +218,35 @@ const TrendsView = (() => {
       App.showSaving();
       await clearHidden();
       App.rerender();
+    });
+
+    document.querySelectorAll('[data-rule-keyword]').forEach(el => {
+      el.addEventListener('change', async () => {
+        App.showSaving();
+        await Categorize.updateRule(el.dataset.ruleKeyword, { keyword: el.value.trim().toUpperCase() });
+        App.rerender();
+      });
+    });
+    document.querySelectorAll('[data-rule-matchtype]').forEach(el => {
+      el.addEventListener('change', async () => {
+        App.showSaving();
+        await Categorize.updateRule(el.dataset.ruleMatchtype, { matchType: el.value });
+        App.rerender();
+      });
+    });
+    document.querySelectorAll('[data-rule-category]').forEach(el => {
+      el.addEventListener('change', async () => {
+        App.showSaving();
+        await Categorize.updateRule(el.dataset.ruleCategory, { category: el.value });
+        App.rerender();
+      });
+    });
+    document.querySelectorAll('[data-rule-delete]').forEach(el => {
+      el.addEventListener('click', async () => {
+        App.showSaving();
+        await Categorize.deleteRule(el.dataset.ruleDelete);
+        App.rerender();
+      });
     });
   }
 

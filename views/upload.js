@@ -10,11 +10,11 @@ const UploadView = (() => {
         <div class="ledger-sub" style="margin-bottom:12px;">CSV, Excel (.xlsx), or PDF bank statement exports.</div>
         <label>Which account are these transactions from?</label>
         <select id="upload-account">
-          ${Store.state.accounts.map(a => `<option value="${a.id}">${a.name} (${a.owner})</option>`).join('')}
+          ${Store.state.accounts.map(a => `<option value="${a.id}">${a.name} (${Store.ownerLabel(a.owner)})</option>`).join('')}
         </select>
         <label>Owner (applies to all imported rows, editable after)</label>
         <select id="upload-owner">
-          ${['Mine','His','Joint'].map(o => `<option>${o}</option>`).join('')}
+          ${['Mine','His','Joint'].map(o => `<option value="${o}">${Store.ownerLabel(o)}</option>`).join('')}
         </select>
         <label style="margin-top:14px;">File</label>
         <input type="file" id="upload-file" accept=".csv,.xlsx,.xls,.pdf">

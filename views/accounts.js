@@ -77,8 +77,8 @@ const AccountsView = (() => {
           <thead>
             <tr style="border-bottom:1px solid var(--border);">
               <th style="text-align:left; padding:4px; font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Institution</th>
-              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-mine); text-transform:uppercase;">Mine</th>
-              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-his); text-transform:uppercase;">His</th>
+              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-mine); text-transform:uppercase;">Niki</th>
+              <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-his); text-transform:uppercase;">Nico</th>
               <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--owner-joint); text-transform:uppercase;">Joint</th>
               <th style="text-align:right; padding:4px; font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Total</th>
             </tr>
@@ -141,14 +141,58 @@ const AccountsView = (() => {
       : Store.state.accounts.filter(a => a.owner === ownerFilter)
     ).filter(a => a.type !== 'Credit Card');
 
+    const restricted = filtered.filter(a => !Store.isLiquid(a));
+    const normal = filtered.filter(a => Store.isLiquid(a) && (a.institution || a.name) !== 'Home Cash Fund');
+    const cashFund = filtered.filter(a => Store.isLiquid(a) && (a.institution || a.name) === 'Home Cash Fund');
+
+    const normalHtml = renderAccountGroups(groupByInstitutionOrName(normal));
+    const cashFundHtml = renderAccountGroups(groupByInstitutionOrName(cashFund));
+    const restrictedHtml = renderAccountGroups(groupByInstitutionOrName(restricted), true);
+
+    return `
+      <div class="filter-row">
+        ${['All', 'Mine', 'His', 'Joint'].map(o => `
+          <button class="pill ${ownerFilter === o ? 'active' : ''}" data-owner-filter="${o}">${o === 'All' ? 'All' : Store.ownerLabel(o)}</button>
+        `).join('')}
+      </div>
+
+      <div class="card">
+        <h3>Net Worth (${ownerFilter === 'All' ? 'All' : Store.ownerLabel(ownerFilter)})</h3>
+        <div class="big-number num">${Store.formatMoney(Store.netWorth(ownerFilter))}</div>
+      </div>
+
+      ${normalHtml || !(cashFundHtml || restrictedHtml) ? `
+        <div class="card">
+          <h3>Accounts</h3>
+          ${normalHtml || `<div class="empty-state">No accounts yet.<br><br><button id="add-account-btn">Add your first account</button></div>`}
+        </div>
+      ` : ''}
+
+      ${cashFundHtml ? `<div class="card">${cashFundHtml}</div>` : ''}
+
+      ${restrictedHtml ? `
+        <details class="card">
+          <summary style="cursor:pointer; font-family:'Fraunces',serif; font-weight:600; font-size:1.05rem;">🔒 Restricted / Retirement Accounts</summary>
+          <div style="margin-top:8px;">${restrictedHtml}</div>
+        </details>
+      ` : ''}
+
+      ${filtered.length ? `<button id="add-account-btn-2" class="secondary" style="width:100%;">+ Add Account</button>` : ''}
+    `;
+  }
+
+  function groupByInstitutionOrName(accts) {
     const groups = {};
-    filtered.forEach(a => {
+    accts.forEach(a => {
       const key = a.institution || a.name;
       if (!groups[key]) groups[key] = [];
       groups[key].push(a);
     });
+    return groups;
+  }
 
-    const rows = Object.entries(groups).map(([groupName, accts]) => {
+  function renderAccountGroups(groups, hideRestrictedBadge) {
+    return Object.entries(groups).map(([groupName, accts]) => {
       const groupTotal = accts.reduce((sum, a) => sum + Store.toHomeCurrency(Store.accountValue(a), a.currency), 0);
       const currencies = accts.map(a => a.currency);
       const allCurrenciesUnique = new Set(currencies).size === currencies.length;
@@ -160,7 +204,7 @@ const AccountsView = (() => {
 
       const acctRows = accts.map(a => {
         const snap = Store.latestSnapshotFor(a.id);
-        const restricted = !Store.isLiquid(a);
+        const restricted = !hideRestrictedBadge && !Store.isLiquid(a);
         return `
           <div class="ledger-row" data-account-id="${a.id}">
             <div class="ledger-main">
@@ -189,26 +233,6 @@ const AccountsView = (() => {
         </div>
       `;
     }).join('');
-
-    return `
-      <div class="filter-row">
-        ${['All', 'Mine', 'His', 'Joint'].map(o => `
-          <button class="pill ${ownerFilter === o ? 'active' : ''}" data-owner-filter="${o}">${o}</button>
-        `).join('')}
-      </div>
-
-      <div class="card">
-        <h3>Net Worth (${ownerFilter})</h3>
-        <div class="big-number num">${Store.formatMoney(Store.netWorth(ownerFilter))}</div>
-      </div>
-
-      <div class="card">
-        <h3>Accounts</h3>
-        ${rows || `<div class="empty-state">No accounts yet.<br><br><button id="add-account-btn">Add your first account</button></div>`}
-      </div>
-
-      ${filtered.length ? `<button id="add-account-btn-2" class="secondary" style="width:100%;">+ Add Account</button>` : ''}
-    `;
   }
 
   function ownerClass(owner) {
@@ -243,7 +267,7 @@ const AccountsView = (() => {
         <div>
           <label>Owner</label>
           <select id="f-owner">
-            ${['Mine', 'His', 'Joint'].map(o => `<option ${existing?.owner === o ? 'selected' : ''}>${o}</option>`).join('')}
+            ${['Mine', 'His', 'Joint'].map(o => `<option value="${o}" ${existing?.owner === o ? 'selected' : ''}>${Store.ownerLabel(o)}</option>`).join('')}
           </select>
         </div>
         <div>
@@ -322,7 +346,7 @@ const AccountsView = (() => {
 
     App.openModal(`
       <h2>${account.name}</h2>
-      <div class="ledger-sub" style="margin-bottom:10px;">${account.institution} · ${account.owner} · ${account.currency}</div>
+      <div class="ledger-sub" style="margin-bottom:10px;">${account.institution} · ${Store.ownerLabel(account.owner)} · ${account.currency}</div>
       <button id="edit-account-btn" class="secondary" style="width:100%; margin-bottom:14px;">Edit account</button>
 
       ${hasSnapshots ? `
@@ -361,7 +385,7 @@ const AccountsView = (() => {
       </div>
       <label>Owner</label>
       <select id="f-owner">
-        ${['Mine','His','Joint'].map(o => `<option ${account.owner === o ? 'selected' : ''}>${o}</option>`).join('')}
+        ${['Mine','His','Joint'].map(o => `<option value="${o}" ${account.owner === o ? 'selected' : ''}>${Store.ownerLabel(o)}</option>`).join('')}
       </select>
       <label>Notes / tags (optional)</label>
       <input id="f-notes" placeholder="e.g. Sarah's wedding">
