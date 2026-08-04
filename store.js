@@ -174,6 +174,21 @@ const Store = (() => {
     return { byType, byOwner, total };
   }
 
+  // Asset type (rows) x Owner (columns) matrix for a given month
+  function monthBreakdownMatrix(monthStr) {
+    const entries = valuesAsOfMonth(monthStr);
+    const owners = ['Mine', 'His', 'Joint'];
+    const byType = {};
+    entries.forEach(({ account, value }) => {
+      if (!byType[account.type]) byType[account.type] = { Mine: 0, His: 0, Joint: 0, total: 0 };
+      byType[account.type][account.owner] = (byType[account.type][account.owner] || 0) + value;
+      byType[account.type].total += value;
+    });
+    return Object.entries(byType)
+      .map(([type, vals]) => ({ type, ...vals }))
+      .sort((a, b) => b.total - a.total);
+  }
+
   // Largest expenses within a given month, excluding card-payment transfers
   function topExpensesForMonth(monthStr, n = 5) {
     return state.transactions
@@ -182,11 +197,18 @@ const Store = (() => {
       .slice(0, n);
   }
 
+  // ---- Owner display labels (stored values stay Mine/His/Joint for backward
+  // compatibility with existing sheet data; only the display text changes) ----
+  const OWNER_LABELS = { Mine: 'Niki', His: 'Nico', Joint: 'Joint' };
+  function ownerLabel(v) {
+    return OWNER_LABELS[v] || v;
+  }
+
   // ---- Liquidity ----
   // RRSP/RESP/pension accounts carry withdrawal penalties/taxes, and accounts
-  // named as a "business" account aren't household liquid net worth either
-  // (e.g. a spouse's business account). Both are detected from the account
-  // name so no sheet schema change is needed.
+  // named as a "business" account aren't household liquid net worth either.
+  // Both are detected from the account name by default, but an explicit
+  // liquidOverride ('Yes'/'No') on the account always wins if set.
   function isLiquid(account) {
     return !/RRSP|RESP|pension/i.test(account.name || '');
   }
@@ -196,7 +218,10 @@ const Store = (() => {
   }
 
   function isLiquidNetWorthAccount(a) {
-    return isNetWorthAccount(a) && isLiquid(a) && !isBusinessAccount(a);
+    if (!isNetWorthAccount(a)) return false; // Credit Card always excluded
+    if (a.liquidOverride === 'Yes') return true;
+    if (a.liquidOverride === 'No') return false;
+    return isLiquid(a) && !isBusinessAccount(a);
   }
 
   // Net Worth is liquid-only by default per household preference — RRSP/RESP,
@@ -222,8 +247,26 @@ const Store = (() => {
     return accounts.map(a => ({
       account: a,
       value: toHomeCurrency(accountValue(a), a.currency),
-      reason: isBusinessAccount(a) ? 'Business account' : 'Restricted (RRSP/RESP/pension)'
+      reason: a.liquidOverride === 'No' ? 'Manually excluded'
+        : isBusinessAccount(a) ? 'Business account'
+        : 'Restricted (RRSP/RESP/pension)'
     }));
+  }
+
+  // Full list of accounts that can be toggled in/out of Liquid Net Worth,
+  // with their current effective state, for the customization checklist.
+  function liquidToggleList() {
+    return state.accounts.filter(isNetWorthAccount).map(a => ({
+      account: a,
+      included: isLiquidNetWorthAccount(a),
+      isDefault: !a.liquidOverride
+    }));
+  }
+
+  async function setLiquidOverride(account, value) {
+    // value: 'Yes' | 'No' | '' (clear override, fall back to auto-detection)
+    const row = Object.assign({}, account, { liquidOverride: value });
+    await Api.upsert('Accounts', row);
   }
 
   function liquidNetWorth(ownerFilter) {
@@ -325,10 +368,10 @@ const Store = (() => {
   return {
     state, loadAll, toHomeCurrency, latestSnapshotFor, accountValue,
     netWorth, netWorthByType, netWorthTrend, formatMoney,
-    snapshotMonthOptions, valuesAsOfMonth, monthBreakdown, topExpensesForMonth,
+    snapshotMonthOptions, valuesAsOfMonth, monthBreakdown, monthBreakdownMatrix, topExpensesForMonth,
     transactionMonthOptions, transactionsForPeriod,
     isLiquid, isBusinessAccount, isLiquidNetWorthAccount, liquidNetWorth,
-    totalNetWorthIncludingRestricted, excludedFromNetWorth,
-    perPersonTypeBreakdown, institutionOwnerMatrix, accountSubtype, recurringSummary
+    totalNetWorthIncludingRestricted, excludedFromNetWorth, liquidToggleList, setLiquidOverride,
+    perPersonTypeBreakdown, institutionOwnerMatrix, accountSubtype, recurringSummary, ownerLabel
   };
 })();
