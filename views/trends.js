@@ -1,5 +1,27 @@
 const TrendsView = (() => {
   let period = 'all'; // 'all' | 'YYYY-MM'
+  let threeMonthChart = null;
+
+  const CHART_COLORS = ['#1F6E5C', '#C97A3E', '#35507A', '#7A5A72', '#9B8B4E', '#5A7A6E'];
+
+  function threeMonthCategoryData() {
+    const now = new Date();
+    const months = [0, 1, 2].map(i => new Date(now.getFullYear(), now.getMonth() - (2 - i), 1));
+    const monthKeys = months.map(d => d.toISOString().slice(0, 7));
+    const byCatMonth = {};
+    Store.state.transactions.forEach(t => {
+      if (Number(t.amount) >= 0 || t.category === 'Transfer') return;
+      const idx = monthKeys.indexOf((t.date || '').slice(0, 7));
+      if (idx === -1) return;
+      if (!byCatMonth[t.category]) byCatMonth[t.category] = [0, 0, 0];
+      byCatMonth[t.category][idx] += Math.abs(Number(t.amount));
+    });
+    const top = Object.entries(byCatMonth)
+      .map(([cat, vals]) => ({ cat, total: vals.reduce((a, b) => a + b, 0), vals }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+    return { labels: months.map(d => d.toLocaleDateString('en-US', { month: 'short' })), series: top };
+  }
 
   function render() {
     const periods = Store.transactionMonthOptions();
@@ -38,6 +60,12 @@ const TrendsView = (() => {
           <option value="all" ${period === 'all' ? 'selected' : ''}>All Time</option>
           ${periods.map(p => `<option value="${p}" ${p === period ? 'selected' : ''}>${monthLabel(p)}</option>`).join('')}
         </select>
+      </div>
+
+      <div class="card">
+        <h3>Last 3 Months by Category</h3>
+        <div class="ledger-sub" style="margin-bottom:6px;">See what's trending up or down.</div>
+        <div class="chart-wrap" style="height:230px;"><canvas id="three-month-chart"></canvas></div>
       </div>
 
       <div class="card">
@@ -120,6 +148,35 @@ const TrendsView = (() => {
   }
 
   function afterRender() {
+    const { labels, series } = threeMonthCategoryData();
+    const ctx = document.getElementById('three-month-chart');
+    if (ctx) {
+      if (threeMonthChart) threeMonthChart.destroy();
+      threeMonthChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: series.map((s, i) => ({
+            label: s.cat,
+            data: s.vals,
+            borderColor: CHART_COLORS[i % CHART_COLORS.length],
+            backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+            tension: 0.3,
+            borderWidth: 2,
+            pointRadius: 3
+          }))
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+          scales: {
+            y: { ticks: { callback: v => Store.formatMoney(v) }, grid: { color: '#E2E0D8' } },
+            x: { grid: { display: false } }
+          }
+        }
+      });
+    }
+
     document.getElementById('period-select')?.addEventListener('change', (e) => {
       period = e.target.value;
       App.rerender();

@@ -1,15 +1,61 @@
 const AccountsView = (() => {
   let ownerFilter = 'All';
-  let viewMode = 'owner'; // 'owner' | 'institution'
+  let viewMode = 'owner'; // 'owner' | 'institution' | 'type'
 
   function render() {
     const modeToggle = `
       <div class="filter-row">
         <button class="pill ${viewMode === 'owner' ? 'active' : ''}" data-view-mode="owner">By Owner</button>
         <button class="pill ${viewMode === 'institution' ? 'active' : ''}" data-view-mode="institution">By Institution</button>
+        <button class="pill ${viewMode === 'type' ? 'active' : ''}" data-view-mode="type">By Type</button>
       </div>
     `;
-    return renderMatrix() + modeToggle + (viewMode === 'institution' ? renderByInstitution() : renderByOwner());
+    let body;
+    if (viewMode === 'institution') body = renderByInstitution();
+    else if (viewMode === 'type') body = renderByType();
+    else body = renderByOwner();
+    return renderMatrix() + modeToggle + body;
+  }
+
+  function renderByType() {
+    const groups = {};
+    Store.state.accounts.filter(a => a.type !== 'Credit Card').forEach(a => {
+      const key = Store.accountSubtype(a);
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(a);
+    });
+
+    const withTotals = Object.entries(groups).map(([type, accts]) => {
+      const total = accts.reduce((sum, a) => sum + Store.toHomeCurrency(Store.accountValue(a), a.currency), 0);
+      return { type, accts, total };
+    }).sort((a, b) => b.total - a.total);
+
+    const cards = withTotals.map(({ type, accts, total }) => {
+      const rows = accts
+        .slice()
+        .sort((a, b) => Store.toHomeCurrency(Store.accountValue(b), b.currency) - Store.toHomeCurrency(Store.accountValue(a), a.currency))
+        .map(a => `
+          <div class="ledger-row" data-account-id="${a.id}">
+            <div class="ledger-main">
+              <span class="owner-dot ${ownerClass(a.owner)}"></span>
+              <span class="ledger-name">${a.name}</span>
+              <span class="ledger-sub">${a.institution || ''}</span>
+            </div>
+            <div class="ledger-amount num">${new Intl.NumberFormat('en-CA', {style:'currency', currency: a.currency}).format(Store.accountValue(a))}</div>
+          </div>
+        `).join('');
+      return `
+        <div class="card">
+          <div style="display:flex; justify-content:space-between;">
+            <h3>${type}</h3>
+            <span class="ledger-amount num">${Store.formatMoney(total)}</span>
+          </div>
+          ${rows}
+        </div>
+      `;
+    }).join('');
+
+    return cards || `<div class="card"><div class="empty-state">No accounts yet</div></div>`;
   }
 
   function renderMatrix() {

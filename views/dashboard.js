@@ -4,7 +4,8 @@ const DashboardView = (() => {
 
   function render() {
     const nw = Store.netWorth('All');
-    const liquidNw = Store.liquidNetWorth('All');
+    const totalIncl = Store.totalNetWorthIncludingRestricted('All');
+    const excluded = Store.excludedFromNetWorth('All');
     const byType = Store.netWorthByType('All');
     const trend = Store.netWorthTrend(12, 'All');
 
@@ -24,14 +25,28 @@ const DashboardView = (() => {
     const goalsHtml = renderGoalsSummary();
     const prediction = computeYearEndPrediction();
 
+    const excludedRows = excluded.map(e => `
+      <div class="ledger-row">
+        <div class="ledger-main">
+          <span class="ledger-name">${e.account.name}</span>
+          <span class="ledger-sub">${e.reason}</span>
+        </div>
+        <div class="ledger-amount num">${Store.formatMoney(e.value)}</div>
+      </div>
+    `).join('') || '<div class="empty-state">Nothing excluded</div>';
+
     return `
       <div class="card">
-        <h3>Household Net Worth</h3>
+        <div style="display:flex; align-items:baseline; gap:6px;">
+          <h3>Liquid Net Worth</h3>
+          <button class="ghost" id="nw-info-btn" style="font-size:0.85rem; padding:0 4px;">ⓘ</button>
+        </div>
         <div class="big-number num">${Store.formatMoney(nw)}</div>
         <span class="delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Store.formatMoney(Math.abs(delta))} (${Math.abs(deltaPct).toFixed(1)}%) this month</span>
-        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
-          <span class="ledger-sub">Liquid (excl. RRSP/RESP/pension)</span>
-          <span class="ledger-amount num">${Store.formatMoney(liquidNw)}</span>
+        <div id="nw-info-panel" style="display:none; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+          <div class="ledger-sub" style="margin-bottom:6px;">Excluded from Liquid Net Worth (${Store.formatMoney(totalIncl - nw)} total):</div>
+          ${excludedRows}
+          <div class="ledger-sub" style="margin-top:8px;">Total incl. these: <span class="num">${Store.formatMoney(totalIncl)}</span></div>
         </div>
         <div class="chart-wrap"><canvas id="nw-chart"></canvas></div>
       </div>
@@ -222,6 +237,11 @@ const DashboardView = (() => {
         }
       });
     }
+
+    document.getElementById('nw-info-btn')?.addEventListener('click', () => {
+      const panel = document.getElementById('nw-info-panel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
 
     document.getElementById('month-select')?.addEventListener('change', (e) => {
       selectedMonth = e.target.value;
