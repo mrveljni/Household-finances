@@ -6,18 +6,20 @@ const Store = (() => {
     goals: [],
     plannedExpenses: [],
     categoryRules: [],
+    recurringOverrides: [],
     fxRates: { CAD: 1 },
     loaded: false
   };
 
   async function loadAll() {
-    const [accounts, snapshots, transactions, goals, plannedExpenses, categoryRules] = await Promise.all([
+    const [accounts, snapshots, transactions, goals, plannedExpenses, categoryRules, recurringOverrides] = await Promise.all([
       Api.get('Accounts'),
       Api.get('Snapshots'),
       Api.get('Transactions'),
       Api.get('Goals'),
       Api.get('PlannedExpenses'),
-      Api.get('CategoryRules')
+      Api.get('CategoryRules'),
+      Api.get('RecurringOverrides')
     ]);
     state.accounts = accounts;
     state.snapshots = snapshots;
@@ -25,6 +27,7 @@ const Store = (() => {
     state.goals = goals;
     state.plannedExpenses = plannedExpenses;
     state.categoryRules = categoryRules;
+    state.recurringOverrides = recurringOverrides;
     state.loaded = true;
     await loadFx();
     return state;
