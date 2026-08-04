@@ -99,24 +99,24 @@ const TrendsView = (() => {
     return new Date(Number(p.slice(0,4)), Number(p.slice(5,7))-1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }
 
-  const HIDE_KEY = 'hft_hidden_recurring_keywords';
-
   function hiddenKeywords() {
-    try { return JSON.parse(localStorage.getItem(HIDE_KEY) || '[]'); } catch { return []; }
+    return Store.state.recurringOverrides.map(r => r.keyword);
   }
 
   function isHidden(keyword) {
     return hiddenKeywords().includes(keyword);
   }
 
-  function hideKeyword(keyword) {
-    const list = hiddenKeywords();
-    if (!list.includes(keyword)) list.push(keyword);
-    localStorage.setItem(HIDE_KEY, JSON.stringify(list));
+  async function hideKeyword(keyword) {
+    await Api.upsert('RecurringOverrides', { keyword });
+    await Store.loadAll();
   }
 
-  function clearHidden() {
-    localStorage.removeItem(HIDE_KEY);
+  async function clearHidden() {
+    for (const r of Store.state.recurringOverrides) {
+      await Api.remove('RecurringOverrides', r.id);
+    }
+    await Store.loadAll();
   }
 
   function afterRender() {
@@ -125,9 +125,17 @@ const TrendsView = (() => {
       App.rerender();
     });
     document.querySelectorAll('[data-hide-keyword]').forEach(btn => {
-      btn.addEventListener('click', () => { hideKeyword(btn.dataset.hideKeyword); App.rerender(); });
+      btn.addEventListener('click', async () => {
+        App.showSaving();
+        await hideKeyword(btn.dataset.hideKeyword);
+        App.rerender();
+      });
     });
-    document.getElementById('show-hidden-link')?.addEventListener('click', () => { clearHidden(); App.rerender(); });
+    document.getElementById('show-hidden-link')?.addEventListener('click', async () => {
+      App.showSaving();
+      await clearHidden();
+      App.rerender();
+    });
   }
 
   return { render, afterRender };
