@@ -1,5 +1,6 @@
 const DashboardView = (() => {
   let chartInstance = null;
+  let forecastChartInstance = null;
   let selectedMonth = null;
   let liquidPanelOpen = false;
 
@@ -46,9 +47,38 @@ const DashboardView = (() => {
 
       ${renderMonthDrilldown()}
 
+      ${renderForecast()}
+
       <div class="card">
         <h3>Goals</h3>
         ${renderGoalsSummary()}
+      </div>
+    `;
+  }
+
+  function renderForecast() {
+    const { labels, series, monthsRemaining } = Store.forecastToYearEnd();
+    if (monthsRemaining <= 0) {
+      return `
+        <div class="card">
+          <h3>Forecast to Year End</h3>
+          <div class="empty-state">You're in the final month of the year — check back in January for next year's forecast.</div>
+        </div>
+      `;
+    }
+    const finalRows = series.map(s => `
+      <div class="ledger-row">
+        <div class="ledger-main"><span class="ledger-name">${s.type}</span></div>
+        <div class="ledger-amount num">${Store.formatMoney(s.values[s.values.length - 1])}</div>
+      </div>
+    `).join('');
+    return `
+      <div class="card">
+        <h3>Forecast to Year End</h3>
+        <div class="ledger-sub" style="margin-bottom:6px;">Projected from each type's recent trend, with upcoming planned expenses subtracted from Cash.</div>
+        <div class="chart-wrap"><canvas id="forecast-chart"></canvas></div>
+        <div class="section-label">Projected December total</div>
+        ${finalRows}
       </div>
     `;
   }
@@ -60,10 +90,11 @@ const DashboardView = (() => {
         <div class="ledger-main">
           <span class="owner-dot ${account.owner==='Mine'?'mine':account.owner==='His'?'his':'joint'}"></span>
           <span class="ledger-name">${account.name}</span>
+          <span class="ledger-sub">${Store.ownerLabel(account.owner)} · ${account.institution || '—'}</span>
         </div>
-        <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-muted);">
+        <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-muted); flex-shrink:0;">
           <input type="checkbox" data-liquid-toggle="${account.id}" ${included ? 'checked' : ''} style="width:auto;">
-          counts as liquid
+          liquid
         </label>
       </div>
     `).join('');
@@ -210,6 +241,36 @@ const DashboardView = (() => {
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false } },
+          scales: {
+            y: { ticks: { callback: v => Store.formatMoney(v) }, grid: { color: '#E2E0D8' } },
+            x: { grid: { display: false } }
+          }
+        }
+      });
+    }
+
+    const { labels: fcLabels, series: fcSeries, monthsRemaining } = Store.forecastToYearEnd();
+    const fcCtx = document.getElementById('forecast-chart');
+    if (fcCtx && monthsRemaining > 0) {
+      if (forecastChartInstance) forecastChartInstance.destroy();
+      const fcColors = ['#1F6E5C', '#C97A3E', '#35507A', '#7A5A72'];
+      forecastChartInstance = new Chart(fcCtx, {
+        type: 'line',
+        data: {
+          labels: fcLabels,
+          datasets: fcSeries.map((s, i) => ({
+            label: s.type,
+            data: s.values,
+            borderColor: fcColors[i % fcColors.length],
+            backgroundColor: fcColors[i % fcColors.length],
+            tension: 0.3,
+            borderWidth: 2,
+            pointRadius: 3
+          }))
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
           scales: {
             y: { ticks: { callback: v => Store.formatMoney(v) }, grid: { color: '#E2E0D8' } },
             x: { grid: { display: false } }

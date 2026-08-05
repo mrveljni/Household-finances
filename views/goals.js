@@ -34,16 +34,20 @@ const GoalsView = (() => {
       </div>
     `).join('');
 
-    return `
-      <div class="section-label">Goals</div>
-      ${goalRows || '<div class="card"><div class="empty-state">No goals yet</div></div>'}
-      <button id="add-goal-btn" class="secondary" style="width:100%; margin-bottom:10px;">+ Add Goal</button>
+    const upcomingTotal = Store.state.plannedExpenses.reduce((s, pe) => s + Number(pe.amount || 0), 0);
 
-      <div class="section-label">Planned Future Expenses</div>
+    return `
       <div class="card">
+        <h3>Upcoming Spend</h3>
+        <div class="big-number num">${Store.formatMoney(upcomingTotal)}</div>
+        <div class="ledger-sub" style="margin-bottom:10px;">Across ${Store.state.plannedExpenses.length} planned item${Store.state.plannedExpenses.length === 1 ? '' : 's'} — factored into the Dashboard forecast.</div>
         ${plannedRows || '<div class="empty-state">None yet — e.g. a wedding, trip, or big purchase you know is coming</div>'}
       </div>
-      <button id="add-planned-btn" class="secondary" style="width:100%;">+ Add Planned Expense</button>
+      <button id="add-planned-btn" class="secondary" style="width:100%; margin-bottom:10px;">+ Add Upcoming Spend</button>
+
+      <div class="section-label">Goals</div>
+      ${goalRows || '<div class="card"><div class="empty-state">No goals yet</div></div>'}
+      <button id="add-goal-btn" class="secondary" style="width:100%;">+ Add Goal</button>
     `;
   }
 
