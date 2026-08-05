@@ -3,7 +3,6 @@ const App = (() => {
   const views = {
     dashboard: DashboardView,
     accounts: AccountsView,
-    trends: TrendsView,
     goals: GoalsView,
     upload: UploadView
   };

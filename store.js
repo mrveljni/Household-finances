@@ -442,7 +442,9 @@ const Store = (() => {
     const now = new Date();
     const currentMonthIdx = now.getMonth();
     const monthsRemaining = 11 - currentMonthIdx;
-    const types = Array.from(new Set(state.accounts.filter(isLiquidNetWorthAccount).map(a => a.type)));
+    const types = Array.from(new Set(
+      state.accounts.filter(isLiquidNetWorthAccount).filter(a => a.type !== 'Liability').map(a => a.type)
+    ));
     const historyMonths = 6;
 
     const labels = [];

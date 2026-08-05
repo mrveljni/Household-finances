@@ -1,7 +1,7 @@
 const CACHE_NAME = 'hft-shell-v2';
 const SHELL_FILES = [
   './index.html', './styles.css', './config.js', './api.js', './store.js', './categorize.js', './app.js',
-  './views/dashboard.js', './views/accounts.js', './views/trends.js', './views/goals.js', './views/upload.js',
+  './views/dashboard.js', './views/accounts.js', './views/goals.js', './views/upload.js',
   './manifest.json'
 ];
 
