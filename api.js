@@ -15,6 +15,21 @@ const Api = (() => {
     localStorage.setItem(cacheKey(sheet), JSON.stringify(rows));
   }
 
+  async function fetchAll() {
+    try {
+      const res = await fetch(`${CONFIG.API_URL}?all=1`);
+      const data = await res.json();
+      if (data && !data.error && typeof data === 'object') {
+        Object.keys(data).forEach(sheet => setCached(sheet, data[sheet]));
+        return data;
+      }
+      return null; // signals caller to fall back to per-sheet fetches
+    } catch (err) {
+      console.warn('getAll failed, falling back to per-sheet fetches', err);
+      return null;
+    }
+  }
+
   async function fetchSheet(sheet) {
     try {
       const res = await fetch(`${CONFIG.API_URL}?sheet=${encodeURIComponent(sheet)}`);
@@ -51,6 +66,7 @@ const Api = (() => {
 
   return {
     get: fetchSheet,
+    getAll: fetchAll,
     upsert: (sheet, row) => post(sheet, 'upsert', { row }),
     bulkUpsert: (sheet, rows) => post(sheet, 'bulkUpsert', { rows }),
     remove: (sheet, id) => post(sheet, 'delete', { id }),

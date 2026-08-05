@@ -48,7 +48,16 @@ const App = (() => {
       btn.addEventListener('click', () => navigate(btn.dataset.view));
     });
 
-    subtitle().textContent = 'Loading your data...';
+    // Instant paint from cache (if any), so returning users aren't staring
+    // at a blank screen while the network round-trip happens.
+    Store.loadFromCache();
+    if (Store.state.loaded) {
+      subtitle().textContent = 'Showing cached data — refreshing...';
+      rerender();
+    } else {
+      subtitle().textContent = 'Loading your data...';
+    }
+
     await Store.loadAll();
     subtitle().textContent = `Updated ${new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
     rerender();

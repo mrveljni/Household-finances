@@ -12,24 +12,45 @@ const Store = (() => {
   };
 
   async function loadAll() {
-    const [accounts, snapshots, transactions, goals, plannedExpenses, categoryRules, recurringOverrides] = await Promise.all([
-      Api.get('Accounts'),
-      Api.get('Snapshots'),
-      Api.get('Transactions'),
-      Api.get('Goals'),
-      Api.get('PlannedExpenses'),
-      Api.get('CategoryRules'),
-      Api.get('RecurringOverrides')
-    ]);
-    state.accounts = accounts;
-    state.snapshots = snapshots;
-    state.transactions = transactions;
-    state.goals = goals;
-    state.plannedExpenses = plannedExpenses;
-    state.categoryRules = categoryRules;
-    state.recurringOverrides = recurringOverrides;
+    const all = await Api.getAll();
+    if (all) {
+      state.accounts = all.Accounts || [];
+      state.snapshots = all.Snapshots || [];
+      state.transactions = all.Transactions || [];
+      state.goals = all.Goals || [];
+      state.plannedExpenses = all.PlannedExpenses || [];
+      state.categoryRules = all.CategoryRules || [];
+      state.recurringOverrides = all.RecurringOverrides || [];
+    } else {
+      // Older Apps Script deployment without the getAll endpoint — fall back
+      const [accounts, snapshots, transactions, goals, plannedExpenses, categoryRules, recurringOverrides] = await Promise.all([
+        Api.get('Accounts'), Api.get('Snapshots'), Api.get('Transactions'), Api.get('Goals'),
+        Api.get('PlannedExpenses'), Api.get('CategoryRules'), Api.get('RecurringOverrides')
+      ]);
+      state.accounts = accounts; state.snapshots = snapshots; state.transactions = transactions;
+      state.goals = goals; state.plannedExpenses = plannedExpenses; state.categoryRules = categoryRules;
+      state.recurringOverrides = recurringOverrides;
+    }
     state.loaded = true;
     await loadFx();
+    return state;
+  }
+
+  // Instant paint from last-known-good local cache, no network — call this
+  // before loadAll() so the UI isn't blank while waiting on the network.
+  function loadFromCache() {
+    state.accounts = Api.getCached('Accounts');
+    state.snapshots = Api.getCached('Snapshots');
+    state.transactions = Api.getCached('Transactions');
+    state.goals = Api.getCached('Goals');
+    state.plannedExpenses = Api.getCached('PlannedExpenses');
+    state.categoryRules = Api.getCached('CategoryRules');
+    state.recurringOverrides = Api.getCached('RecurringOverrides');
+    try {
+      const cachedFx = localStorage.getItem('hft_fx');
+      if (cachedFx) state.fxRates = JSON.parse(cachedFx);
+    } catch {}
+    state.loaded = state.accounts.length > 0 || state.snapshots.length > 0;
     return state;
   }
 
@@ -326,10 +347,13 @@ const Store = (() => {
       .sort((a, b) => b.total - a.total);
   }
 
-  // ---- Rolling 12-month recurring detection ----
-  // A merchant counts as "recurring" if it shows up in at least 3 distinct
-  // months within the trailing window, and drops off automatically if it
-  // hasn't recurred in the last `dropoffMonths` — no stale flags to manage.
+  // ---- Recurring detection ----
+  // A subscription often shares a merchant keyword with unrelated one-off spend
+  // (e.g. a monthly gym membership AND an occasional smoothie at the same
+  // place). So instead of just grouping by keyword, we cluster by keyword AND
+  // similar amount, then only treat a cluster as "recurring" if it charged in
+  // 3 consecutive months — that's what actually distinguishes a subscription
+  // from incidental repeat visits.
   function recurringSummary(windowMonths = 12, dropoffMonths = 2) {
     const now = new Date();
     const cutoff = new Date(now.getFullYear(), now.getMonth() - windowMonths, now.getDate());
@@ -342,17 +366,111 @@ const Store = (() => {
     const byKeyword = {};
     spend.forEach(t => {
       const kw = Categorize.extractKeyword(t.description);
-      if (!byKeyword[kw]) byKeyword[kw] = { keyword: kw, months: new Set(), total: 0, latest: t, category: t.category, count: 0 };
-      const g = byKeyword[kw];
-      g.months.add((t.date || '').slice(0, 7));
-      g.total += Math.abs(Number(t.amount));
-      g.count += 1;
-      if (new Date(t.date) > new Date(g.latest.date)) g.latest = t;
+      (byKeyword[kw] = byKeyword[kw] || []).push(t);
     });
 
-    return Object.values(byKeyword)
-      .filter(g => g.months.size >= 3 && new Date(g.latest.date) >= dropoff)
-      .sort((a, b) => b.total - a.total);
+    const results = [];
+    Object.entries(byKeyword).forEach(([keyword, txns]) => {
+      // cluster by amount: tolerance = max($2, 5%)
+      const clusters = [];
+      txns.sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(t => {
+        const amt = Math.abs(Number(t.amount));
+        let cluster = clusters.find(c => Math.abs(c.avgAmount - amt) <= Math.max(2, amt * 0.05));
+        if (!cluster) { cluster = { txns: [], avgAmount: amt }; clusters.push(cluster); }
+        cluster.txns.push(t);
+        cluster.avgAmount = cluster.txns.reduce((s, x) => s + Math.abs(Number(x.amount)), 0) / cluster.txns.length;
+      });
+
+      // pick the best qualifying cluster for this keyword, if any
+      let best = null;
+      clusters.forEach(cluster => {
+        const monthSet = new Set(cluster.txns.map(t => (t.date || '').slice(0, 7)));
+        const months = Array.from(monthSet).sort();
+        if (months.length < 3) return;
+        // check the most recent 3+ months in this cluster are consecutive
+        let consecutiveRun = 1;
+        for (let i = months.length - 1; i > 0; i--) {
+          const cur = new Date(months[i] + '-01');
+          const prev = new Date(months[i - 1] + '-01');
+          const diff = (cur.getFullYear() - prev.getFullYear()) * 12 + (cur.getMonth() - prev.getMonth());
+          if (diff === 1) consecutiveRun++; else break;
+        }
+        if (consecutiveRun < 3) return;
+        const latest = cluster.txns[cluster.txns.length - 1];
+        if (new Date(latest.date) < dropoff) return; // stale, hasn't charged recently
+        const total = cluster.txns.reduce((s, x) => s + Math.abs(Number(x.amount)), 0);
+        const monthlyAvg = total / months.length;
+        const candidate = {
+          keyword, latest, category: latest.category,
+          months: monthSet, consecutiveRun,
+          lastAmount: Math.abs(Number(latest.amount)),
+          rollingAnnual: monthlyAvg * 12
+        };
+        if (!best || months.length > best.months.size) best = candidate;
+      });
+      if (best) results.push(best);
+    });
+
+    return results.sort((a, b) => b.rollingAnnual - a.rollingAnnual);
+  }
+
+  // ---- Year-end forecast, by asset type, incorporating planned expenses ----
+  function typeMonthlySeries(type, monthsBack) {
+    const now = new Date();
+    const months = [];
+    for (let i = monthsBack - 1; i >= 0; i--) months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
+    return months.map(monthDate => {
+      const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+      let total = 0;
+      state.accounts.filter(isLiquidNetWorthAccount).filter(a => a.type === type).forEach(a => {
+        const snaps = state.snapshots
+          .filter(s => s.accountId === a.id && new Date(s.date) <= monthEnd)
+          .sort((x, y) => new Date(y.date) - new Date(x.date));
+        if (snaps[0]) {
+          const snap = snaps[0];
+          const val = (a.type === 'Private Stock' && snap.shares && snap.pricePerShare)
+            ? Number(snap.shares) * Number(snap.pricePerShare)
+            : Number(snap.balance) || 0;
+          total += toHomeCurrency(val, a.currency);
+        }
+      });
+      return total;
+    });
+  }
+
+  function forecastToYearEnd() {
+    const now = new Date();
+    const currentMonthIdx = now.getMonth();
+    const monthsRemaining = 11 - currentMonthIdx;
+    const types = Array.from(new Set(state.accounts.filter(isLiquidNetWorthAccount).map(a => a.type)));
+    const historyMonths = 6;
+
+    const labels = [];
+    for (let i = 0; i <= monthsRemaining; i++) {
+      labels.push(new Date(now.getFullYear(), currentMonthIdx + i, 1).toLocaleDateString('en-US', { month: 'short' }));
+    }
+
+    const series = types.map(type => {
+      const hist = typeMonthlySeries(type, historyMonths);
+      const avgDelta = hist.length > 1 ? (hist[hist.length - 1] - hist[0]) / (hist.length - 1) : 0;
+      const current = hist[hist.length - 1] || 0;
+      const values = [current];
+      for (let i = 1; i <= monthsRemaining; i++) {
+        let projected = current + avgDelta * i;
+        if (type === 'Cash') {
+          const monthKey = new Date(now.getFullYear(), currentMonthIdx + i, 1).toISOString().slice(0, 7);
+          const startKey = new Date(now.getFullYear(), currentMonthIdx, 1).toISOString().slice(0, 7);
+          const cumPlanned = state.plannedExpenses
+            .filter(pe => { const pk = (pe.period || '').slice(0, 7); return pk && pk >= startKey && pk <= monthKey; })
+            .reduce((s, pe) => s + Number(pe.amount || 0), 0);
+          projected -= cumPlanned;
+        }
+        values.push(projected);
+      }
+      return { type, values };
+    });
+
+    return { labels, series, monthsRemaining };
   }
 
   function transactionMonthOptions() {
@@ -366,12 +484,13 @@ const Store = (() => {
   }
 
   return {
-    state, loadAll, toHomeCurrency, latestSnapshotFor, accountValue,
+    state, loadAll, loadFromCache, toHomeCurrency, latestSnapshotFor, accountValue,
     netWorth, netWorthByType, netWorthTrend, formatMoney,
     snapshotMonthOptions, valuesAsOfMonth, monthBreakdown, monthBreakdownMatrix, topExpensesForMonth,
     transactionMonthOptions, transactionsForPeriod,
     isLiquid, isBusinessAccount, isLiquidNetWorthAccount, liquidNetWorth,
     totalNetWorthIncludingRestricted, excludedFromNetWorth, liquidToggleList, setLiquidOverride,
-    perPersonTypeBreakdown, institutionOwnerMatrix, accountSubtype, recurringSummary, ownerLabel
+    perPersonTypeBreakdown, institutionOwnerMatrix, accountSubtype, recurringSummary, ownerLabel,
+    forecastToYearEnd
   };
 })();
