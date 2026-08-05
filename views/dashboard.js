@@ -287,9 +287,15 @@ const DashboardView = (() => {
     document.querySelectorAll('[data-liquid-toggle]').forEach(el => {
       el.addEventListener('change', async () => {
         const account = Store.state.accounts.find(a => a.id === el.dataset.liquidToggle);
+        const intended = el.checked ? 'Yes' : 'No';
         App.showSaving();
-        await Store.setLiquidOverride(account, el.checked ? 'Yes' : 'No');
+        await Store.setLiquidOverride(account, intended);
         await Store.loadAll();
+        const updated = Store.state.accounts.find(a => a.id === account.id);
+        if (updated && updated.liquidOverride !== intended) {
+          alert('This didn\'t save — your Accounts sheet is missing the "liquidOverride" column. Add that header to the Accounts tab, then try again.');
+          el.checked = !el.checked; // revert the visual state since it didn't actually save
+        }
         App.rerender();
       });
     });

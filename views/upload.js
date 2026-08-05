@@ -216,7 +216,7 @@ const UploadView = (() => {
     await Store.loadAll();
     step = 'select';
     parsedRows = [];
-    App.navigate('trends');
+    App.navigate('accounts');
   }
 
   return { render, afterRender };
